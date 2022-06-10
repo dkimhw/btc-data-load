@@ -1,3 +1,4 @@
-username = "admin"
-port = 5555
-database = {name='mydb', schema='main'}
+username = "doadmin"
+host = 'db-postgresql-nyc3-17024-do-user-11762763-0.b.db.ondigitalocean.com'
+port = 25060
+database = 'blockchain'

@@ -79,31 +79,17 @@ for block in blocks:
   # block_weight = block['weight']
   # block_ntx = block['nTx']
 
-  block_data = (block['hash'], block['height'], block['version'], block['previousblockhash'], block['merkleroot']
-  , block['time'], datetime.fromtimestamp(block['time']).strftime('%Y-%m-%d %H:%M:%S'), block['bits'], block['nonce']
-  ,  block['size'], block['nTx'], block['confirmations'])
+  block_data = (block['hash'], block['height'])
   insert_blocks.append(block_data)
 
 
-  # ('00000000000000000001f57b8d76a12e7fdda6576dce2edf7b7072d96c91f493'
-  # , 740214
-  # , 637706240
-  # , '0000000000000000000209d89a5d57d171c4bf7f8620a76f2133894d33b36896'
-  # , 'b92abf0fd13510444e1d352b48caa4d82ddb33235cf6f3904ac404426e394394'
-  # , 1654872117
-  # , '2022-06-10 16:41:57'
-  # , '17094b6a'
-  # , 925557108
-  # , 1503692
-  # , 3367
-  # , 2)
-
+print(insert_blocks[0])
 try:
   connection = psycopg2.connect(user = settings.username, password = settings.password , host= settings.host, port = settings.port, database = settings.database)
   cursor = connection.cursor()
 
-  postgres_insert_query = """ INSERT INTO bitcoin.blocks (hash, height, version, prevhash, merkleroot, time, timeestamp, bits, nonce, size, weight, num_tx, confirmations)
-  VALUES (%s, %d, %d, %s, %s, %d, %s, %s, %d, %d, %d, %d)"""
+  postgres_insert_query = """ INSERT INTO bitcoin.blocks_test (hash, height)
+  VALUES (%s, %s)"""
   record_to_insert = insert_blocks[0]
   cursor.execute(postgres_insert_query, record_to_insert)
 
@@ -120,36 +106,3 @@ finally:
         cursor.close()
         connection.close()
         print("PostgreSQL connection is closed")
-
-
-
-def load_bitcoin_data ():
-  return None
-
-def parse_block(blk):
-  return None
-
-def parse_bitcoin_txs ():
-  return None
-
-def parse_tx_ins ():
-  return None
-
-def parse_tx_outs ():
-  return None
-
-
-
-# def initial_load():
-#     with sqlite3.connect('bitcoin_blockchain.db') as conn:
-#         for c in range(0, chunks+1):
-#             block_stats = [rpc_connection.getblockstats(i) for i in range(c*chunk_size+1, (c+1)*chunk_size)]
-
-#             df = pd.DataFrame(block_stats)
-#             df['feerate_percentiles'] = df['feerate_percentiles'].astype(str)
-#             df.to_sql('blockchain', conn, if_exists='append')
-#         print(f'finished {(c+1)*chunk_size} record')
-
-
-
-# Then Transactions, T_OUT, T_IN

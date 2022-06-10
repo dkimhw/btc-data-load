@@ -1,52 +1,71 @@
 
 
 import psycopg2
-from config import config
-
+from config import settings
 
 def create_tables():
     """ create tables in the PostgreSQL database"""
     commands = (
         """
-        CREATE TABLE vendors (
-            vendor_id SERIAL PRIMARY KEY,
-            vendor_name VARCHAR(255) NOT NULL
-        )
-        """,
-        """ CREATE TABLE parts (
-                part_id SERIAL PRIMARY KEY,
-                part_name VARCHAR(255) NOT NULL
-                )
+            CREATE SCHEMA IF NOT EXISTS bitcoin;
         """,
         """
-        CREATE TABLE part_drawings (
-                part_id INTEGER PRIMARY KEY,
-                file_extension VARCHAR(5) NOT NULL,
-                drawing_data BYTEA NOT NULL,
-                FOREIGN KEY (part_id)
-                REFERENCES parts (part_id)
-                ON UPDATE CASCADE ON DELETE CASCADE
-        )
+            CREATE TABLE IF NOT EXISTS bitcoin.blocks_test (
+                hash          TEXT PRIMARY KEY
+                ,height       INT NOT NULL
+            );
         """,
         """
-        CREATE TABLE vendor_parts (
-                vendor_id INTEGER NOT NULL,
-                part_id INTEGER NOT NULL,
-                PRIMARY KEY (vendor_id , part_id),
-                FOREIGN KEY (vendor_id)
-                    REFERENCES vendors (vendor_id)
-                    ON UPDATE CASCADE ON DELETE CASCADE,
-                FOREIGN KEY (part_id)
-                    REFERENCES parts (part_id)
-                    ON UPDATE CASCADE ON DELETE CASCADE
-        )
+            CREATE TABLE IF NOT EXISTS bitcoin.blocks (
+                hash          BYTEA PRIMARY KEY
+                ,height       INT NOT NULL
+                ,version      INT NOT NULL
+                ,prevhash     BYTEA NOT NULL
+                ,merkleroot   BYTEA NOT NULL
+                ,time         INT NOT NULL
+                ,timeestamp   TIMESTAMP NOT NULL
+                ,bits         INT NOT NULL
+                ,nonce        INT NOT NULL
+                ,size         BIGINT NOT NULL
+                ,weight       BIGINT NOT NULL
+                ,num_tx       INT NOT NULL
+                ,confirmations BIGINT NOT NULL
+            );
+        """,
+        """
+            CREATE TABLE IF NOT EXISTS bitcoin.txs (
+                txid         BYTEA PRIMARY KEY
+                ,version      INT NOT NULL
+                ,locktime     INT NOT NULL
+                ,size         INT NOT NULL
+                ,weight       INT NOT NULL
+                ,block_hash   BYTEA NOT NULL
+            );
+        """,
+        """
+            CREATE TABLE IF NOT EXISTS bitcoin.txouts (
+                txid        BIGINT NOT NULL
+                ,n            INT NOT NULL
+                ,value        BIGINT NOT NULL
+                ,scriptpubkey BYTEA NOT NULL
+                ,address TEXT NOT NULL
+                ,PRIMARY KEY (txid, n)
+            );
+        """,
+        """
+            CREATE TABLE IF NOT EXISTS bitcoin.txins (
+                txid          BIGINT NOT NULL
+                ,n             INT NOT NULL
+                ,scriptsig     BYTEA NOT NULL
+                ,sequence      INT NOT NULL
+                ,PRIMARY KEY (txid, n)
+            );
         """)
     conn = None
     try:
-        # read the connection parameters
-        params = config()
+
         # connect to the PostgreSQL server
-        conn = psycopg2.connect(**params)
+        conn = psycopg2.connect(user = settings.username, password = settings.password , host= settings.host, port = settings.port, database = settings.database)
         cur = conn.cursor()
         # create table one by one
         for command in commands:

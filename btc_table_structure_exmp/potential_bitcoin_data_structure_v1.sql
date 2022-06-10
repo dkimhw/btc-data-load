@@ -1,36 +1,37 @@
-  CREATE TABLE blocks (
-  hash          BYTEA NOT NULL -- primary key
-  ,height       INT NOT NULL
-  ,version      INT NOT NULL
-  ,prevhash     BYTEA NOT NULL
-  ,merkleroot   BYTEA NOT NULL
-  ,time         INT NOT NULL
-  ,timeestamp   TIMESTAMP NOT NULL
-  ,bits         INT NOT NULL
-  ,nonce        INT NOT NULL
-  ,size         BIGINT NOT NULL
-  ,weight       BIGINT NOT NULL
-  ,num_tx       INT NOT NULL
-  ,confirmations BIGINT NOT NULL
-  -- Columns orphan, status, filen and filepos are from the CBlockIndex class which is serialized in LevelDb and not formally part of the blockchain.
-  -- ,orphan       BOOLEAN NOT NULL DEFAULT false
-  -- ,status       INT NOT NULL
-  -- ,filen        INT NOT NULL
-  -- ,filepos      INT NOT NULL
+  CREATE TABLE IF NOT EXISTS bitcoin.blocks_test (
+    hash          BYTEA PRIMARY KEY
+    ,height       INT NOT NULL
   );
 
 
-  CREATE TABLE txs (
-   txid         BYTEA NOT NULL -- Hash of the transaction; PRIMARY KEY
-   ,version      INT NOT NULL
-   ,locktime     INT NOT NULL
-   ,size         INT NOT NULL
-   ,weight       INT NOT NULL
-   ,block_hash   BYTEA NOT NULL -- Foreign key to has in blocks table
+  CREATE TABLE IF NOT EXISTS blocks (
+    hash          BYTEA PRIMARY KEY
+    ,height       INT NOT NULL
+    ,version      INT NOT NULL
+    ,prevhash     BYTEA NOT NULL
+    ,merkleroot   BYTEA NOT NULL
+    ,time         INT NOT NULL
+    ,timeestamp   TIMESTAMP NOT NULL
+    ,bits         INT NOT NULL
+    ,nonce        INT NOT NULL
+    ,size         INT NOT NULL
+    ,weight       INT NOT NULL
+    ,num_tx       INT NOT NULL
+    ,confirmations INT NOT NULL
   );
 
 
-  CREATE TABLE txouts (
+  CREATE TABLE IF NOT EXISTS txs (
+    txid         BYTEA PRIMARY KEY -- Hash of the transaction; PRIMARY KEY
+    ,version      INT NOT NULL
+    ,locktime     INT NOT NULL
+    ,size         INT NOT NULL
+    ,weight       INT NOT NULL
+    ,block_hash   BYTEA NOT NULL -- Foreign key to has in blocks table
+  );
+
+
+  CREATE TABLE IF NOT EXISTS txouts (
     txid        BIGINT NOT NULL -- hash of the tx that output belongs to
     ,n            INT NOT NULL -- n is the position within the output list.
     ,value        BIGINT NOT NULL -- bitcoin that wen out
@@ -44,11 +45,12 @@
     -- The spent column is an optimization, it is not part of the blockchain. An output is spent if later in the blockchain there exists an input referencing it.
     -- Example of Spent: https://blockstream.info/tx/0cd43a7fd3c47ebe09b9c8001eec7a7af1effbfa87b5f74279d15c66b6c66ea7?expand
     -- ,spent        BOOL NOT NULL
+    PRIMARY KEY (txid, n)
   );
 
 
   -- Questions: How to tease out addresses for txins?
-  CREATE TABLE txins (
+  CREATE TABLE IF NOT EXISTS txins (
     txid          BIGINT NOT NULL -- hash of the tx that input belongs to
     ,n             INT NOT NULL
     -- This is the hard part I think creating maybe an intermediary table that does this
@@ -56,5 +58,6 @@
     -- ,prevout_n     INT NOT NULL
     ,scriptsig     BYTEA NOT NULL
     ,sequence      INT NOT NULL -- value in 'vin'
-    ,witness       BYTEA -- where is this?
+    --,witness       BYTEA -- where is this?
+    PRIMARY KEY (txid, n)
   );
