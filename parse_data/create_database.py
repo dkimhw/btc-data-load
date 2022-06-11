@@ -14,7 +14,7 @@ def create_tables():
                 hash          BYTEA PRIMARY KEY
                 ,height       INT NOT NULL
                 ,version      INT NOT NULL
-                ,prevhash     BYTEA NOT NULL
+                ,prev_hash     BYTEA NOT NULL
                 ,merkleroot   BYTEA NOT NULL
                 ,time         INT NOT NULL
                 ,timestamp    TIMESTAMP NOT NULL

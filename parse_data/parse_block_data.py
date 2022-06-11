@@ -1,13 +1,14 @@
 
-
 import sys
 sys.path.insert(1, '../')
 from config import settings
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
-import psycopg2
+from io import StringIO
+import csv
 from datetime import datetime
-import time
+import pandas as pd
 import json
+from sqlalchemy import create_engine
 
 # rpc_user and rpc_password are set in the bitcoin.conf file
 rpc_user = "username"
@@ -15,178 +16,153 @@ rpc_pass = "password"
 rpc_host = "127.0.0.1" # if running locally then 127.0.0.1
 rpc_connection = AuthServiceProxy(f"http://{rpc_user}:{rpc_pass}@{rpc_host}:8332", timeout=240)
 
-def load_bitcoin_data (num_blocks):
-    end_block = rpc_connection.getblockcount()
-    start_block = end_block - num_blocks
+def psql_insert_copy(table, conn, keys, data_iter):
+    """
+    Execute SQL statement inserting data
+    """
+    # Gets a DBAPI connection that can provide a cursor
+    dbapi_conn = conn.connection
+    with dbapi_conn.cursor() as cur:
+        s_buf = StringIO()
+        writer = csv.writer(s_buf)
+        writer.writerows(data_iter)
+        s_buf.seek(0)
 
-    commands = [ [ "getblockhash", height] for height in range(start_block, end_block) ]
-    block_hashes = rpc_connection.batch_(commands)
-    blocks = rpc_connection.batch_([ [ "getblock", h, 2 ] for h in block_hashes ])
+        columns = ', '.join('"{}"'.format(k) for k in keys)
+        if table.schema:
+            table_name = '{}.{}'.format(table.schema, table.name)
+        else:
+            table_name = table.name
 
-    try:
-      connection = psycopg2.connect(user = settings.username, password = settings.password , host= settings.host, port = settings.port, database = settings.database)
-    except (Exception, psycopg2.Error) as error:
-      print("Failed to insert record into blocks table", error)
+        sql = 'COPY {} ({}) FROM STDIN WITH CSV'.format(
+            table_name, columns)
+        cur.copy_expert(sql=sql, file=s_buf)
 
+
+def get_blocks (num_blocks):
+  """
+  Retrieves a block by blockhash
+  """
+  end_block = rpc_connection.getblockcount()
+  start_block = end_block - num_blocks
+
+  commands = [ [ "getblockhash", height] for height in range(start_block, end_block) ]
+  block_hashes = rpc_connection.batch_(commands)
+  blocks = rpc_connection.batch_([ [ "getblock", h, 2 ] for h in block_hashes ])
+
+  return blocks
+
+def load_bitcoin_blocks (blocks):
+  """
+  Load bitcoin block data
+  """
+  engine = create_engine(f'postgresql://{settings.username}:{settings.password}@{settings.host}:{settings.port}/{settings.database}')
+
+  blocks_to_insert = []
+  for block in blocks:
+    parsed_block = {
+      'hash': block['hash'],
+      'height': block['height'],
+      'version': block['version'],
+      'prev_hash': block['previousblockhash'],
+      'merkleroot': block['merkleroot'],
+      'time': block['time'],
+      'timestamp': datetime.fromtimestamp(block['time']).strftime('%Y-%m-%d %H:%M:%S'),
+      'bits': block['bits'],
+      'nonce': block['nonce'],
+      'size': block['size'],
+      'weight': block['weight'],
+      'num_tx': block['nTx'],
+      'confirmations': block['confirmations']
+    }
+    blocks_to_insert.append(parsed_block)
+
+  df = pd.DataFrame(blocks_to_insert)
+  df.to_sql(name='blocks', con = engine, schema='bitcoin', if_exists='append', index=False, method=psql_insert_copy)
+
+
+def load_bitcoin_txs (blocks):
+    """
+    Bulk uploads bitcoin data
+    """
+    transactions_to_insert = []
+    tx_ins_to_insert = []
+    tx_outs_to_insert = []
     for block in blocks:
       # Process block metadata
-      parse_bitcoin_block(block, connection)
+      transactions = block['tx']
+      for transaction in transactions:
+        #Parse fees; no fee on coinbase transaction
+        if 'fee' in transaction.keys():
+          fee = str(transaction['fee'])
+        else:
+          fee = '0.00000000'
 
-      # Process transactions
-      parse_bitcoin_txs(block, connection)
+        block_hash = block['hash']
 
-    if connection:
-        connection.close()
-        print("PostgreSQL connection is closed")
+        parsed_transaction = {
+          'tx_id': transaction['txid'],
+          'version': transaction['version'],
+          'size': transaction['size'],
+          'vsize': transaction['vsize'],
+          'weight': transaction['weight'],
+          'locktime': transaction['locktime'],
+          'fee': fee,
+          'block_hash': block_hash
+        }
 
+        transactions_to_insert.append(parsed_transaction)
 
-#############################
-# Parse Block
-#############################
+        # Transaction Details
+        tx_ins_to_insert += parse_tx_ins(transaction['vin'], transaction['txid'])
+        tx_outs_to_insert += parse_tx_outs(transaction['vout'], transaction['txid'])
 
-def parse_bitcoin_block(block, conn):
-  parsed_block_data = (block['hash'], block['height'], block['version'], block['previousblockhash'], block['merkleroot']
-  , block['time'], datetime.fromtimestamp(block['time']).strftime('%Y-%m-%d %H:%M:%S'), block['bits'], block['nonce']
-  ,  block['size'], block['weight'], block['nTx'], block['confirmations'])
+    tx = pd.DataFrame(transactions_to_insert)
+    engine = create_engine(f'postgresql://{settings.username}:{settings.password}@{settings.host}:{settings.port}/{settings.database}')
 
-  insert_block(parsed_block_data, conn)
+    # Bulk insert TX metadata
+    tx.to_sql(name='txs', con = engine, schema='bitcoin', if_exists='append', index=False, method=psql_insert_copy)
 
-def insert_block (block, conn):
-  try:
-    cursor = conn.cursor()
+    # Bulk insert TX IN
+    tx_in = pd.DataFrame(tx_ins_to_insert)
+    tx_in.to_sql(name='tx_ins', con = engine, schema='bitcoin', if_exists='append', index=False, method=psql_insert_copy)
 
-    postgres_insert_query = """
-    INSERT INTO bitcoin.blocks (hash, height, version, prevhash, merkleroot, time, timestamp
-    , bits, nonce, size, weight, num_tx, confirmations)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
-    record_to_insert = block
-    cursor.execute(postgres_insert_query, record_to_insert)
-
-    conn.commit()
-    count = cursor.rowcount
-    print(count, "Record inserted successfully into blocks table")
-
-  except (Exception, psycopg2.Error) as error:
-    print("Failed to insert record into blocks table", error)
-
-  finally:
-      if cursor:
-          cursor.close()
+    # Bulk insert TX OUT
+    tx_out = pd.DataFrame(tx_outs_to_insert)
+    tx_out.to_sql(name='tx_outs', con = engine, schema='bitcoin', if_exists='append', index=False, method=psql_insert_copy)
 
 
-#############################
-# Parse Transactions Metadata
-#############################
-
-def parse_bitcoin_txs (block, conn):
-  block_hash = block['hash']
-  transactions = block['tx']
-
-  for transaction in transactions:
-    # Parse fees; no fee on coinbase transaction
-    if 'fee' in transaction.keys():
-      fee = str(transaction['fee'])
-    else:
-      fee = '0.00000000'
-
-    # Parse transaction metadata
-    parsed_transaction = (transaction['txid'], transaction['version'], transaction['size'], transaction['vsize']
-    , transaction['weight'], transaction['locktime'], fee, block_hash)
-    insert_tx(parsed_transaction, conn)
-
-    tx_id = transaction['txid']
-
-    # Parse vin
-    vin = transaction['vin']
-    parse_tx_ins(vin, tx_id, conn)
-
-    # Parse vout
-    vout = transaction['vout']
-    parse_tx_outs(vout, tx_id, conn)
-
-def insert_tx (tx, conn):
-  try:
-    cursor = conn.cursor()
-
-    postgres_insert_query = """ INSERT INTO bitcoin.txs (tx_id, version, size, vsize, weight, locktime, fee, block_hash)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
-    cursor.execute(postgres_insert_query, tx)
-
-    conn.commit()
-    count = cursor.rowcount
-    print(count, "Record inserted successfully into table")
-  except (Exception, psycopg2.Error) as error:
-    print("Failed to insert record into table", error)
-
-  finally:
-      if cursor:
-          cursor.close()
-
-
-#############################
-# Parse Transaction Ins
-#############################
-
-def parse_tx_ins (t_ins, tx_id, conn):
+def parse_tx_ins (t_ins, tx_id):
+  to_insert = []
   for t_in in t_ins:
-    # {'coinbase': '045a0c011c026d17', 'sequence': 4294967295}
-    # {'txid': 'd561a3594fcf97dd1a1abe7a1eda15c8e335aaaecf97f959de0595298d87c6d5', 'vout': 1, 'scriptSig': {'asm': '3045022100fc81c1d7a6abac1e35d555204eb81825f0b1fcab6038d5b52c15c1547c66cfd6022055746f7ecde0c22a919a0a57ca134d47c47e0a375d6f043e3ee97f6108861c1d[ALL] 045f0d6e6e49cc01c7a1535c2fe67e9ebc85849a9a45f013ed3cc7db7e8b54276a86da044b703173ea812e5297c39bc28a0393414fc15614f08b7622d35bda466c', 'hex': '483045022100fc81c1d7a6abac1e35d555204eb81825f0b1fcab6038d5b52c15c1547c66cfd6022055746f7ecde0c22a919a0a57ca134d47c47e0a375d6f043e3ee97f6108861c1d0141045f0d6e6e49cc01c7a1535c2fe67e9ebc85849a9a45f013ed3cc7db7e8b54276a86da044b703173ea812e5297c39bc28a0393414fc15614f08b7622d35bda466c'}, 'sequence': 4294967295}
     if 'coinbase' in t_in.keys():
       continue
     else :
-      current_transaction_in = (t_in['txid'], t_in['vout'], json.dumps(t_in['scriptSig']), t_in['sequence'], tx_id)
-    insert_tx_in(current_transaction_in, conn)
+      parsed_transaction = {
+        'prev_tx_id': t_in['txid'],
+        'prev_n': t_in['vout'],
+        'scriptsig': json.dumps(t_in['scriptSig']),
+        'sequence': t_in['sequence'],
+        'curr_tx_id': tx_id
+      }
+      to_insert.append(parsed_transaction)
 
-def insert_tx_in (t_in, conn):
-  try:
-    cursor = conn.cursor()
+  return to_insert
 
-    postgres_insert_query = """ INSERT INTO bitcoin.tx_ins (prev_tx_id, prev_n, scriptsig, sequence, curr_tx_id)
-    VALUES (%s, %s, %s, %s, %s)"""
-    cursor.execute(postgres_insert_query, t_in)
-
-    conn.commit()
-    count = cursor.rowcount
-    print(count, "Record inserted successfully into tx_ins")
-
-  except (Exception, psycopg2.Error) as error:
-    print("Failed to insert record into tx_ins", error)
-
-  finally:
-      # closing database connection.
-      if cursor:
-        cursor.close()
-
-
-#############################
-# Parse Transaction Outs
-#############################
-
-def parse_tx_outs (t_outs, tx_id, conn):
+def parse_tx_outs (t_outs, tx_id):
+  to_insert = []
   for t_out in t_outs:
     if 'address' in t_out['scriptPubKey'].keys():
       address = t_out['scriptPubKey']['address']
     else:
       address = None
 
-    transactions_out = (tx_id, t_out['n'], str(t_out['value']), json.dumps(t_out['scriptPubKey']), address)
-    insert_tx_out(transactions_out, conn)
-
-def insert_tx_out (t_out, conn):
-  try:
-    cursor = conn.cursor()
-
-    postgres_insert_query = """ INSERT INTO bitcoin.tx_outs (tx_id, n, value, scriptpubkey, address)
-    VALUES (%s, %s, %s, %s, %s)"""
-    cursor.execute(postgres_insert_query, t_out)
-
-    conn.commit()
-    count = cursor.rowcount
-    print(count, "Record inserted successfully into tx_outs")
-
-  except (Exception, psycopg2.Error) as error:
-    print("Failed to insert record into tx_outs", error)
-
-  finally:
-      if cursor:
-          cursor.close()
+    parsed_transaction = {
+      'tx_id': tx_id,
+      'n': t_out['n'],
+      'value': str(t_out['value']),
+      'scriptpubkey': json.dumps(t_out['scriptPubKey']),
+      'address': address
+    }
+    to_insert.append(parsed_transaction)
+  return to_insert
