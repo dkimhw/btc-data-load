@@ -9,4 +9,5 @@
   rpcuser = username
   rpcpassword = password
   ```
+4. Run `pip install -r requirements.txt` in the working directory of btc-data-load
 3. Run script `python app.py`

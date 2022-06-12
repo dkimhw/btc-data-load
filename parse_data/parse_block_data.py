@@ -38,18 +38,43 @@ def psql_insert_copy(table, conn, keys, data_iter):
             table_name, columns)
         cur.copy_expert(sql=sql, file=s_buf)
 
-
-def get_blocks (num_blocks):
+def load_bitcoin_data (num_blocks):
   """
-  Retrieves a block by blockhash
+  Load bitcoin data in chunks of five
+  """
+  hashes = get_hashes(num_blocks)
+  chunk_size = 5
+
+  idx = 0
+  while idx < len(hashes):
+    chunk_hashes = []
+    for hash in range(idx, idx + chunk_size):
+      chunk_hashes.append(hashes[hash])
+
+    print('Processing: ', chunk_hashes)
+    blocks = get_blocks_by_hashes(chunk_hashes)
+    load_bitcoin_blocks(blocks)
+    load_bitcoin_txs(blocks)
+    idx += chunk_size
+
+  print('Finished loading bitcoin data')
+
+def get_hashes (num_blocks):
+  """
+  Retrieve hashes by desired blocks
   """
   end_block = rpc_connection.getblockcount()
   start_block = end_block - num_blocks
 
   commands = [ [ "getblockhash", height] for height in range(start_block, end_block) ]
   block_hashes = rpc_connection.batch_(commands)
-  blocks = rpc_connection.batch_([ [ "getblock", h, 2 ] for h in block_hashes ])
+  return block_hashes
 
+def get_blocks_by_hashes (hashes):
+  """
+  Retrieve blocks by given hashes
+  """
+  blocks = rpc_connection.batch_([ [ "getblock", h, 2 ] for h in hashes ])
   return blocks
 
 def load_bitcoin_blocks (blocks):
