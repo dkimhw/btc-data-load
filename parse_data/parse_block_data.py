@@ -9,6 +9,7 @@ from datetime import datetime
 import pandas as pd
 import json
 from sqlalchemy import create_engine
+import psycopg2
 
 # rpc_user and rpc_password are set in the bitcoin.conf file
 rpc_user = "username"
@@ -16,27 +17,175 @@ rpc_pass = "password"
 rpc_host = "127.0.0.1" # if running locally then 127.0.0.1
 rpc_connection = AuthServiceProxy(f"http://{rpc_user}:{rpc_pass}@{rpc_host}:8332", timeout=240)
 
-def psql_insert_copy(table, conn, keys, data_iter):
-    """
-    Execute SQL statement inserting data
-    """
-    # Gets a DBAPI connection that can provide a cursor
-    dbapi_conn = conn.connection
-    with dbapi_conn.cursor() as cur:
-        s_buf = StringIO()
-        writer = csv.writer(s_buf)
-        writer.writerows(data_iter)
-        s_buf.seek(0)
 
-        columns = ', '.join('"{}"'.format(k) for k in keys)
-        if table.schema:
-            table_name = '{}.{}'.format(table.schema, table.name)
-        else:
-            table_name = table.name
+def get_most_recent_coinbase_tx():
+  try:
+    # connect to the PostgreSQL server
+    conn = psycopg2.connect(user = settings.username, password = settings.password , host= settings.host, port = settings.port, database = settings.database)
+    cur = conn.cursor()
+    cur.execute('SELECT MAX(b.height) AS max_height FROM bitcoin.coinbase_txs AS ct INNER JOIN bitcoin.blocks AS b ON ct.block_hash = b.hash')
+    h = cur.fetchone()
 
-        sql = 'COPY {} ({}) FROM STDIN WITH CSV'.format(
-            table_name, columns)
-        cur.copy_expert(sql=sql, file=s_buf)
+    if h[0]:
+      return h[0]
+    else:
+      return -1
+  except (Exception, psycopg2.DatabaseError) as error:
+      print(error)
+  finally:
+      if conn is not None:
+          conn.close()
+
+def get_most_recent_block_header():
+  try:
+    # connect to the PostgreSQL server
+    conn = psycopg2.connect(user = settings.username, password = settings.password , host= settings.host, port = settings.port, database = settings.database)
+    cur = conn.cursor()
+    cur.execute('SELECT MAX(height) AS max_height FROM bitcoin.blocks')
+    h = cur.fetchone()
+
+    if h[0]:
+      return h[0]
+    else:
+      return -1
+  except (Exception, psycopg2.DatabaseError) as error:
+      print(error)
+  finally:
+      if conn is not None:
+          conn.close()
+
+def load_block_headers (type = 'all'):
+  end_block = rpc_connection.getblockcount()
+
+  if type == 'update':
+    recent_h = get_most_recent_block_header()
+  else:
+    recent_h = 0
+
+  chunk_size = 1000
+  chunks = int((end_block - recent_h) / chunk_size)
+
+  for c in range(0, chunks + 1):
+    blocks_to_insert = []
+    if type == 'update' and c == 0:
+      start = c * chunk_size + 1 + recent_h
+    else:
+      start = c * chunk_size + recent_h
+
+    if (c + 1) * chunk_size + recent_h >= end_block:
+      end = end_block
+    else:
+      end = (c + 1) * chunk_size + recent_h
+
+    print(f'Processing blocks between {start} and {end - 1}')
+    commands = [ [ "getblockhash", height] for height in range(start, end) ]
+    hashes = rpc_connection.batch_(commands)
+    blocks = rpc_connection.batch_([ [ "getblock", h, 1 ] for h in hashes])
+
+    for block in blocks:
+      if 'previousblockhash' in block.keys():
+        previousblockhash = block['previousblockhash']
+      else:
+        previousblockhash = None
+
+      parsed_block = {
+        'hash': block['hash'],
+        'height': block['height'],
+        'version': block['version'],
+        'prev_hash': previousblockhash,
+        'merkleroot': block['merkleroot'],
+        'time': block['time'],
+        'timestamp': datetime.fromtimestamp(block['time']).strftime('%Y-%m-%d %H:%M:%S'),
+        'bits': block['bits'],
+        'nonce': block['nonce'],
+        'size': block['size'],
+        'weight': block['weight'],
+        'num_tx': block['nTx'],
+        'confirmations': block['confirmations']
+      }
+      blocks_to_insert.append(parsed_block)
+
+    engine = create_engine(f'postgresql://{settings.username}:{settings.password}@{settings.host}:{settings.port}/{settings.database}')
+    blocks = pd.DataFrame(blocks_to_insert)
+    blocks.to_sql(name='blocks', con = engine, schema='bitcoin', if_exists='append', index=False, method=psql_insert_copy)
+
+def load_one_block (block_h):
+  blocks_to_insert = []
+
+  commands = [ [ "getblockhash", block_h] ]
+  hashes = rpc_connection.batch_(commands)
+
+  block = rpc_connection.batch_([ [ "getblock", h, 1 ] for h in hashes])
+  block = block[0]
+
+  if 'previousblockhash' in block.keys():
+    previousblockhash = block['previousblockhash']
+  else:
+    previousblockhash = None
+
+  parsed_block = {
+    'hash': block['hash'],
+    'height': block['height'],
+    'version': block['version'],
+    'prev_hash': previousblockhash,
+    'merkleroot': block['merkleroot'],
+    'time': block['time'],
+    'timestamp': datetime.fromtimestamp(block['time']).strftime('%Y-%m-%d %H:%M:%S'),
+    'bits': block['bits'],
+    'nonce': block['nonce'],
+    'size': block['size'],
+    'weight': block['weight'],
+    'num_tx': block['nTx'],
+    'confirmations': block['confirmations']
+  }
+  blocks_to_insert.append(parsed_block)
+  engine = create_engine(f'postgresql://{settings.username}:{settings.password}@{settings.host}:{settings.port}/{settings.database}')
+  blocks = pd.DataFrame(blocks_to_insert)
+  blocks.to_sql(name='blocks', con = engine, schema='bitcoin', if_exists='append', index=False, method=psql_insert_copy)
+
+def load_coinbase_txs (type = 'all'):
+  end_block = get_most_recent_block_header()
+
+  if type == 'update':
+    recent_h = get_most_recent_coinbase_tx()
+    if recent_h == -1:
+      recent_h = 0
+  else:
+    recent_h = 0
+
+  chunk_size = 1000
+  chunks = int((end_block - recent_h) / chunk_size)
+
+  for c in range(0, chunks + 1):
+    coinbase_txs_to_insert = []
+
+    if type == 'update' and c == 0:
+      start = c * chunk_size + 1 + recent_h
+    else:
+      start = c * chunk_size + recent_h
+
+    if (c + 1) * chunk_size + recent_h >= end_block:
+      end = end_block
+    else:
+      end = (c + 1) * chunk_size + recent_h
+
+    print(f'Processing blocks between {start} and {end - 1}')
+    commands = [ [ "getblockhash", height] for height in range(start, end) ]
+    hashes = rpc_connection.batch_(commands)
+    blocks = rpc_connection.batch_([ [ "getblock", h, 1 ] for h in hashes])
+
+    for block in blocks:
+      first_tx = block['tx']
+      parsed_coinbase_tx = {
+        'tx_id': first_tx[0]
+        , 'block_hash': block['hash']
+      }
+      coinbase_txs_to_insert.append(parsed_coinbase_tx)
+    engine = create_engine(f'postgresql://{settings.username}:{settings.password}@{settings.host}:{settings.port}/{settings.database}')
+    coinbase_txs = pd.DataFrame(coinbase_txs_to_insert)
+    coinbase_txs.to_sql(name='coinbase_txs', con = engine, schema='bitcoin', if_exists='append', index=False, method=psql_insert_copy)
+
+
 
 def load_bitcoin_data (num_blocks):
   """
@@ -48,7 +197,14 @@ def load_bitcoin_data (num_blocks):
   idx = 0
   while idx < len(hashes):
     chunk_hashes = []
-    for hash in range(idx, idx + chunk_size):
+
+    # check if it's out of range
+    if (chunk_size + idx >= len(hashes)):
+      loop_range = len(hashes)
+    else:
+      loop_range = idx + chunk_size
+
+    for hash in range(idx, loop_range):
       chunk_hashes.append(hashes[hash])
 
     print('Processing: ', chunk_hashes)
@@ -100,6 +256,7 @@ def load_bitcoin_blocks (blocks):
       'num_tx': block['nTx'],
       'confirmations': block['confirmations']
     }
+
     blocks_to_insert.append(parsed_block)
 
   df = pd.DataFrame(blocks_to_insert)
@@ -191,3 +348,25 @@ def parse_tx_outs (t_outs, tx_id):
     }
     to_insert.append(parsed_transaction)
   return to_insert
+
+def psql_insert_copy(table, conn, keys, data_iter):
+    """
+    Execute SQL statement inserting data
+    """
+    # Gets a DBAPI connection that can provide a cursor
+    dbapi_conn = conn.connection
+    with dbapi_conn.cursor() as cur:
+        s_buf = StringIO()
+        writer = csv.writer(s_buf)
+        writer.writerows(data_iter)
+        s_buf.seek(0)
+
+        columns = ', '.join('"{}"'.format(k) for k in keys)
+        if table.schema:
+            table_name = '{}.{}'.format(table.schema, table.name)
+        else:
+            table_name = table.name
+
+        sql = 'COPY {} ({}) FROM STDIN WITH CSV'.format(
+            table_name, columns)
+        cur.copy_expert(sql=sql, file=s_buf)

@@ -14,9 +14,9 @@ def create_tables():
                 hash          BYTEA PRIMARY KEY
                 ,height       INT NOT NULL
                 ,version      INT NOT NULL
-                ,prev_hash     BYTEA NOT NULL
+                ,prev_hash    BYTEA
                 ,merkleroot   BYTEA NOT NULL
-                ,time         INT NOT NULL
+                ,time         BIGINT NOT NULL
                 ,timestamp    TIMESTAMP NOT NULL
                 ,bits         TEXT NOT NULL
                 ,nonce        BIGINT NOT NULL
@@ -27,45 +27,13 @@ def create_tables():
             );
         """,
         """
-            CREATE TABLE IF NOT EXISTS bitcoin.txs (
-                tx_id          BYTEA PRIMARY KEY
-                ,version      INT NOT NULL
-                ,size         INT NOT NULL
-                ,vsize        INT NOT NULL
-                ,weight       INT NOT NULL
-                ,locktime     INT NOT NULL
-                ,fee          DECIMAL(16, 8) NOT NULL
+            CREATE TABLE IF NOT EXISTS bitcoin.coinbase_txs (
+                tx_id         BYTEA NOT NULL
                 ,block_hash   BYTEA NOT NULL
+                ,PRIMARY KEY (tx_id, block_hash)
                 ,CONSTRAINT fk_block_hash
                     FOREIGN KEY(block_hash)
                     REFERENCES bitcoin.blocks(hash)
-            );
-        """,
-        """
-            CREATE TABLE IF NOT EXISTS bitcoin.tx_outs (
-                tx_id            BYTEA NOT NULL
-                ,n              INT NOT NULL
-                ,value          DECIMAL(16, 8) NOT NULL
-                ,scriptpubkey   JSON NOT NULL
-                ,address        TEXT
-                ,PRIMARY KEY (tx_id, n)
-                ,CONSTRAINT fk_tx
-                    FOREIGN KEY(tx_id)
-                    REFERENCES bitcoin.txs(tx_id)
-            );
-        """,
-        """
-            CREATE TABLE IF NOT EXISTS bitcoin.tx_ins (
-                prev_tx_id      BYTEA NOT NULL -- previous hash tx_id
-                ,prev_n         INT NOT NULL -- previous hash n
-                ,scriptsig      JSON NOT NULL
-                ,sequence       BIGINT NOT NULL
-                ,curr_tx_id     BYTEA NOT NULL
-                ,PRIMARY KEY (prev_tx_id, prev_n)
-                ,CONSTRAINT fk_tx
-                    FOREIGN KEY(curr_tx_id)
-                    REFERENCES bitcoin.txs(tx_id)
-                -- Due to the nature of this table - we cannot force foreign key constraint since we are limiting the size of the table
             );
         """)
     conn = None
