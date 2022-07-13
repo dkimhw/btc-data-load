@@ -73,7 +73,7 @@ def load_block_headers (type = 'all'):
       start = c * chunk_size + recent_h
 
     if (c + 1) * chunk_size + recent_h >= end_block:
-      end = end_block
+      end = end_block + 1
     else:
       end = (c + 1) * chunk_size + recent_h
 
@@ -165,7 +165,7 @@ def load_coinbase_txs (type = 'all'):
       start = c * chunk_size + recent_h
 
     if (c + 1) * chunk_size + recent_h >= end_block:
-      end = end_block
+      end = end_block + 1
     else:
       end = (c + 1) * chunk_size + recent_h
 
