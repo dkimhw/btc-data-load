@@ -9,6 +9,6 @@ if __name__ == '__main__':
   cd.create_tables()
   recent_height = pbd.get_most_recent_coinbase_tx()
   if recent_height != -1:
-    pbd.load_coinbase_txs('update')
+    pbd.parse_coinbase_txs_data_in_chunks_esplora('update')
   else:
-    pbd.load_coinbase_txs()
+    pbd.parse_coinbase_txs_data_in_chunks_esplora()

@@ -10,30 +10,49 @@ def create_tables():
             CREATE SCHEMA IF NOT EXISTS bitcoin;
         """,
         """
-            CREATE TABLE IF NOT EXISTS bitcoin.blocks (
-                hash          BYTEA PRIMARY KEY
-                ,height       INT NOT NULL
-                ,version      INT NOT NULL
-                ,prev_hash    BYTEA
-                ,merkleroot   BYTEA NOT NULL
-                ,time         BIGINT NOT NULL
-                ,timestamp    TIMESTAMP NOT NULL
-                ,bits         TEXT NOT NULL
-                ,nonce        BIGINT NOT NULL
-                ,size         INT NOT NULL
-                ,weight       INT NOT NULL
-                ,num_tx       INT NOT NULL
-                ,confirmations BIGINT NOT NULL
+            CREATE TABLE IF NOT EXISTS bitcoin.block_headers (
+                hash varchar NOT NULL,
+                height integer NOT NULL,
+                "version" integer NOT NULL,
+                prev_block_hash varchar,
+                merkle_root varchar NOT NULL,
+                "timestamp" timestamp NOT NULL,
+                bits varchar NOT NULL,
+                nonce bigint NOT NULL,
+                size bigint NOT NULL,
+                weight bigint NOT NULL,
+                num_tx integer NOT NULL,
+                confirmations integer NOT NULL,
+                CONSTRAINT block_headers_pkey PRIMARY KEY(hash)
+            );
+        """,
+        """
+            CREATE TABLE IF NOT EXISTS bitcoin.known_addresses (
+                address varchar NOT NULL,
+                tx_outputs_vout integer NOT NULL,
+                tx_outputs_txid integer NOT NULL,
+                "owner" varchar NOT NULL,
+                kyc bool NOT NULL,
+                "type" varchar NOT NULL,
+                CONSTRAINT known_addresses_pkey PRIMARY KEY(address)
             );
         """,
         """
             CREATE TABLE IF NOT EXISTS bitcoin.coinbase_txs (
-                tx_id         BYTEA NOT NULL
-                ,block_hash   BYTEA NOT NULL
-                ,PRIMARY KEY (tx_id, block_hash)
-                ,CONSTRAINT fk_block_hash
+                txid varchar NOT NULL,
+                block_hash varchar NOT NULL,
+                "version" integer NOT NULL,
+                witness_root varchar,
+                locktime integer NOT NULL,
+                size bigint NOT NULL,
+                weight bigint NOT NULL,
+                fee int,
+                confirmed boolean,
+                outputs json NOT NULL,
+                CONSTRAINT coinbase_txs_pkey PRIMARY KEY(txid, block_hash),
+                CONSTRAINT fk_block_hash
                     FOREIGN KEY(block_hash)
-                    REFERENCES bitcoin.blocks(hash)
+                    REFERENCES bitcoin.block_headers(hash)
             );
         """)
     conn = None

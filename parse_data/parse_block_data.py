@@ -10,6 +10,7 @@ import pandas as pd
 import json
 from sqlalchemy import create_engine
 import psycopg2
+import requests
 
 # rpc_user and rpc_password are set in the bitcoin.conf file
 rpc_user = "username"
@@ -41,7 +42,7 @@ def get_most_recent_block_header():
     # connect to the PostgreSQL server
     conn = psycopg2.connect(user = settings.username, password = settings.password , host= settings.host, port = settings.port, database = settings.database)
     cur = conn.cursor()
-    cur.execute('SELECT MAX(height) AS max_height FROM bitcoin.blocks')
+    cur.execute('SELECT MAX(height) AS max_height FROM bitcoin.block_headers')
     h = cur.fetchone()
 
     if h[0]:
@@ -92,9 +93,8 @@ def load_block_headers (type = 'all'):
         'hash': block['hash'],
         'height': block['height'],
         'version': block['version'],
-        'prev_hash': previousblockhash,
-        'merkleroot': block['merkleroot'],
-        'time': block['time'],
+        'prev_block_hash': previousblockhash,
+        'merkle_root': block['merkleroot'],
         'timestamp': datetime.fromtimestamp(block['time']).strftime('%Y-%m-%d %H:%M:%S'),
         'bits': block['bits'],
         'nonce': block['nonce'],
@@ -107,7 +107,7 @@ def load_block_headers (type = 'all'):
 
     engine = create_engine(f'postgresql://{settings.username}:{settings.password}@{settings.host}:{settings.port}/{settings.database}')
     blocks = pd.DataFrame(blocks_to_insert)
-    blocks.to_sql(name='blocks', con = engine, schema='bitcoin', if_exists='append', index=False, method=psql_insert_copy)
+    blocks.to_sql(name='block_headers', con = engine, schema='bitcoin', if_exists='append', index=False, method=psql_insert_copy)
 
 def load_one_block (block_h):
   blocks_to_insert = []
@@ -127,9 +127,8 @@ def load_one_block (block_h):
     'hash': block['hash'],
     'height': block['height'],
     'version': block['version'],
-    'prev_hash': previousblockhash,
-    'merkleroot': block['merkleroot'],
-    'time': block['time'],
+    'prev_block_hash': previousblockhash,
+    'merkle_root': block['merkleroot'],
     'timestamp': datetime.fromtimestamp(block['time']).strftime('%Y-%m-%d %H:%M:%S'),
     'bits': block['bits'],
     'nonce': block['nonce'],
@@ -185,7 +184,67 @@ def load_coinbase_txs (type = 'all'):
     coinbase_txs = pd.DataFrame(coinbase_txs_to_insert)
     coinbase_txs.to_sql(name='coinbase_txs', con = engine, schema='bitcoin', if_exists='append', index=False, method=psql_insert_copy)
 
+def parse_coinbase_txs_data_in_chunks_esplora(type = 'all'):
+  end_block = int(requests.get(f'https://blockstream.info/api/blocks/tip/height').text)
 
+  if type == 'update':
+    recent_h = get_most_recent_block_header()
+  else:
+    recent_h = 0
+
+  chunk_size = 1000
+  chunks = int((end_block - recent_h) / chunk_size)
+
+  # for c in range(0, chunks + 1):
+  for c in range(0, 1):
+    if type == 'update' and c == 0:
+      start = c * chunk_size + 1 + recent_h
+    else:
+      start = c * chunk_size + recent_h
+
+    if (c + 1) * chunk_size + recent_h >= end_block:
+      end = end_block + 1
+    else:
+      end = (c + 1) * chunk_size + recent_h
+
+    print(f'Processing blocks between {start} and {end - 1}')
+
+    load_coinbase_txs_data_with_esplora(start, end)
+
+def load_coinbase_txs_data_with_esplora (sheight, eheight):
+  """
+  Get block header data & coinbase txs and insert the data into postgres database
+  """
+  coinbase_txs_to_insert = []
+  for height in range(sheight, eheight + 1):
+    # /block-height/:height
+    bhash_response = requests.get(f'https://blockstream.info/api/block-height/{height}')
+    bhash = str(bhash_response.text)
+
+    tx_id_response = requests.get('https://blockstream.info/api/block/bhash/txid/0')
+    tx_id = str(tx_id_response)
+
+    # Get coinbase tx
+    tx_response = requests.get(f'https://blockstream.info/api/tx/{tx_id}').text
+    tx = json.loads(tx_response)
+
+    parsed_tx = {
+      'txid': tx['txid'],
+      'block_hash': tx['status']['block_hash'],
+      'version': tx['version'],
+      'witness_root': tx['vin']['witness'],
+      'locktime': tx['locktime'],
+      'size': tx['size'],
+      'weight': tx['weight'],
+      'fee': tx['fee'],
+      'confirmed': tx['status']['confirmed'],
+      'outputs': tx['vout']
+    }
+    coinbase_txs_to_insert.append(parsed_tx)
+
+  engine = create_engine(f'postgresql://{settings.username}:{settings.password}@{settings.host}:{settings.port}/{settings.database}')
+  coinbase_txs_to_insert = pd.DataFrame(coinbase_txs_to_insert)
+  coinbase_txs_to_insert.to_sql(name='coinbase_txs', con = engine, schema='bitcoin', if_exists='append', index=False, method=psql_insert_copy)
 
 def load_bitcoin_data (num_blocks):
   """

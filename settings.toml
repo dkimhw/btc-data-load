@@ -1,4 +1,4 @@
-username = "doadmin"
-host = 'db-postgresql-nyc3-17024-do-user-11762763-0.b.db.ondigitalocean.com'
-port = 25060
+username = "postgres"
+host = 'database.cm0ffnxusddt.eu-west-3.rds.amazonaws.com'
+port = 5432
 database = 'blockchain'
