@@ -24,7 +24,7 @@ def get_most_recent_coinbase_tx():
     # connect to the PostgreSQL server
     conn = psycopg2.connect(user = settings.username, password = settings.password , host= settings.host, port = settings.port, database = settings.database)
     cur = conn.cursor()
-    cur.execute('SELECT MAX(b.height) AS max_height FROM bitcoin.coinbase_txs AS ct INNER JOIN bitcoin.blocks AS b ON ct.block_hash = b.hash')
+    cur.execute('SELECT MAX(b.height) AS max_height FROM bitcoin.coinbase_txs AS ct INNER JOIN bitcoin.block_headers AS b ON ct.block_hash = b.hash')
     h = cur.fetchone()
 
     if h[0]:
@@ -188,15 +188,15 @@ def parse_coinbase_txs_data_in_chunks_esplora(type = 'all'):
   end_block = int(requests.get(f'https://blockstream.info/api/blocks/tip/height').text)
 
   if type == 'update':
-    recent_h = get_most_recent_block_header()
+    recent_h = get_most_recent_coinbase_tx()
   else:
     recent_h = 0
 
-  chunk_size = 1000
+  chunk_size = 500
   chunks = int((end_block - recent_h) / chunk_size)
+  print("Num of iterations: ", chunks)
 
-  # for c in range(0, chunks + 1):
-  for c in range(0, 1):
+  for c in range(0, chunks + 1):
     if type == 'update' and c == 0:
       start = c * chunk_size + 1 + recent_h
     else:
@@ -208,7 +208,6 @@ def parse_coinbase_txs_data_in_chunks_esplora(type = 'all'):
       end = (c + 1) * chunk_size + recent_h
 
     print(f'Processing blocks between {start} and {end - 1}')
-
     load_coinbase_txs_data_with_esplora(start, end)
 
 def load_coinbase_txs_data_with_esplora (sheight, eheight):
@@ -216,34 +215,37 @@ def load_coinbase_txs_data_with_esplora (sheight, eheight):
   Get block header data & coinbase txs and insert the data into postgres database
   """
   coinbase_txs_to_insert = []
-  for height in range(sheight, eheight + 1):
+  for height in range(sheight, eheight):
     # /block-height/:height
     bhash_response = requests.get(f'https://blockstream.info/api/block-height/{height}')
     bhash = str(bhash_response.text)
+    # print('Bhash', bhash)
 
-    tx_id_response = requests.get('https://blockstream.info/api/block/bhash/txid/0')
-    tx_id = str(tx_id_response)
+    tx_id_response = requests.get(f'https://blockstream.info/api/block/{bhash}/txid/0')
+    tx_id = str(tx_id_response.text)
+    # print(tx_id)
 
     # Get coinbase tx
     tx_response = requests.get(f'https://blockstream.info/api/tx/{tx_id}').text
     tx = json.loads(tx_response)
+    vout = json.dumps(tx['vout'])
 
     parsed_tx = {
       'txid': tx['txid'],
       'block_hash': tx['status']['block_hash'],
       'version': tx['version'],
-      'witness_root': tx['vin']['witness'],
       'locktime': tx['locktime'],
       'size': tx['size'],
       'weight': tx['weight'],
       'fee': tx['fee'],
-      'confirmed': tx['status']['confirmed'],
-      'outputs': tx['vout']
+      'outputs': vout
     }
     coinbase_txs_to_insert.append(parsed_tx)
 
+
   engine = create_engine(f'postgresql://{settings.username}:{settings.password}@{settings.host}:{settings.port}/{settings.database}')
   coinbase_txs_to_insert = pd.DataFrame(coinbase_txs_to_insert)
+  print(coinbase_txs_to_insert)
   coinbase_txs_to_insert.to_sql(name='coinbase_txs', con = engine, schema='bitcoin', if_exists='append', index=False, method=psql_insert_copy)
 
 def load_bitcoin_data (num_blocks):

@@ -42,13 +42,11 @@ def create_tables():
                 txid varchar NOT NULL,
                 block_hash varchar NOT NULL,
                 "version" integer NOT NULL,
-                witness_root varchar,
                 locktime integer NOT NULL,
                 size bigint NOT NULL,
                 weight bigint NOT NULL,
                 fee int,
-                confirmed boolean,
-                outputs json NOT NULL,
+                outputs jsonb NOT NULL,
                 CONSTRAINT coinbase_txs_pkey PRIMARY KEY(txid, block_hash),
                 CONSTRAINT fk_block_hash
                     FOREIGN KEY(block_hash)
