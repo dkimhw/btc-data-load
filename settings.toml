@@ -1,4 +1,4 @@
 username = "postgres"
-host = 'database.cm0ffnxusddt.eu-west-3.rds.amazonaws.com'
+host = 'database-2.cu318v5akzfj.us-east-1.rds.amazonaws.com'
 port = 5432
-database = 'blockchain'
+database = 'postgres'
