@@ -112,6 +112,49 @@ def load_block_headers (type = 'all'):
     blocks = pd.DataFrame(blocks_to_insert)
     blocks.to_sql(name='block_headers', con = engine, schema='bitcoin', if_exists='append', index=False, method=psql_insert_copy)
 
+
+def load_transaction_ins (startUpload, endUpload, conn):
+  end_block = endUpload
+
+  chunk_size = 25
+  chunks = int((end_block - startUpload) / chunk_size)
+
+  for c in range(0, chunks + 1):
+  # for c in range(0, 1):
+    data_to_insert = []
+    if type == 'update' and c == 0:
+      start = c * chunk_size + 1 + startUpload
+    else:
+      start = c * chunk_size + startUpload
+
+    if (c + 1) * chunk_size + startUpload >= end_block:
+      end = end_block + 1
+    else:
+      end = (c + 1) * chunk_size + startUpload
+
+    print(f'Processing blocks between {start} and {end - 1}')
+    commands = [ [ "getblockhash", height] for height in range(start, end) ]
+    hashes = rpc_connection.batch_(commands)
+    blocks = rpc_connection.batch_([ [ "getblock", h, 2 ] for h in hashes])
+
+    for block in blocks:
+      add_vins = []
+      for tx in block['tx']:
+        for vin in tx['vin']:
+          if 'txid' in vin:
+            add_vins.append({vin['txid']: tx['txid']})
+
+      if len(add_vins) == 0:
+        add_vins = None
+      else:
+        add_vins = json.dumps(add_vins)
+      # connect to the PostgreSQL server
+      cur = conn.cursor()
+      # create table one by one
+      cur.execute("insert into bitcoin.block_vins values (%s, %s);", (block['hash'] , add_vins))
+      conn.commit()
+
+
 def load_one_block (block_h):
   blocks_to_insert = []
 
@@ -189,9 +232,9 @@ def load_coinbase_txs (type = 'all'):
 
 
 def parse_coinbase_txs_data_in_chunks_esplora2(start_block):
-  end_block = get_most_recent_block_header()
+  end_block = 650000
 
-  chunk_size = 50
+  chunk_size = 300
   chunks = int((end_block - start_block) / chunk_size)
   print("Num of iterations: ", chunks)
 

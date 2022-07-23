@@ -38,6 +38,15 @@ def create_tables():
             );
         """,
         """
+            CREATE TABLE bitcoin.block_vins (
+                block_hash varchar primary key,
+                vins varchar[],
+                CONSTRAINT fk_block_hash
+                    FOREIGN KEY(block_hash)
+                    REFERENCES bitcoin.block_headers(hash)
+            );
+        """,
+        """
             CREATE TABLE IF NOT EXISTS bitcoin.coinbase_txs (
                 txid varchar NOT NULL,
                 block_hash varchar NOT NULL,
