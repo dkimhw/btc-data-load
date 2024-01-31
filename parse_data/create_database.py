@@ -27,17 +27,6 @@ def create_tables():
             );
         """,
         """
-            CREATE TABLE IF NOT EXISTS bitcoin.known_addresses (
-                address varchar NOT NULL,
-                tx_outputs_vout integer NOT NULL,
-                tx_outputs_txid integer NOT NULL,
-                "owner" varchar NOT NULL,
-                kyc bool NOT NULL,
-                "type" varchar NOT NULL,
-                CONSTRAINT known_addresses_pkey PRIMARY KEY(address)
-            );
-        """,
-        """
             CREATE TABLE bitcoin.block_vins (
                 block_hash varchar primary key,
                 vins varchar[],
