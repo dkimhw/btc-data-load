@@ -6,9 +6,9 @@ import parse_block_data as pbd
 
 if __name__ == '__main__':
   # Load only create tables
-  cd.create_tables()
+  # cd.create_tables()
   recent_height = pbd.get_most_recent_coinbase_tx()
   if recent_height != -1:
-    pbd.parse_coinbase_txs_data_in_chunks_esplora('update')
+    pbd.load_coinbase_txs('update')
   else:
-    pbd.parse_coinbase_txs_data_in_chunks_esplora()
+    pbd.load_coinbase_txs()
